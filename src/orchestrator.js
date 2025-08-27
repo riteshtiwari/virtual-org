@@ -17,13 +17,21 @@ export async function runSession(input) {
   const context = input.context || '';
   const figmaUrl = input.figmaUrl || '';
   const sources = sanitizeArray(input.sources);
+  const designAreas = sanitizeArray(input.designAreas);
   const sliders = input.sliders || { harshness: 3, innovation_bias: 'neutral', horizon: 'MVP' };
+
+  // Format design areas for context
+  const designAreasText = designAreas.length > 0 
+    ? `DESIGN AREAS TO FOCUS ON:\n${designAreas.map(area => `• ${area.name} (${area.type || 'general'})`).join('\n')}`
+    : '';
 
   const baseUser = `
 SESSION GOAL: Deliver a high‑value design critique so the human is better prepared for real reviews.
 FIGMA: ${figmaUrl || '(none provided)'}
 CONTEXT (from organizer): 
 ${context}
+
+${designAreasText}
 
 SOURCES (optional): 
 ${sources.join('\n') || '(none)'}
