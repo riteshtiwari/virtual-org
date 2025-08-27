@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Virtual Org — Design Critique (POC)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; line-height: 1.5; }
+    .card { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    label { display:block; font-weight:600; margin-top: 12px; }
+    input[type="text"], textarea, select { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 10px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { background: black; color: white; border: 0; padding: 12px 16px; border-radius: 999px; cursor: pointer; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#f3f4f6; margin-right:6px; }
+    pre { background: #0b1020; color: #cbdef5; padding: 12px; border-radius: 12px; overflow:auto; }
+    small { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>🏢 Virtual Org — Design Critique (POC)</h1>
+  <p>Spin up a role‑based AI panel to critique your design and output a structured report.</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Figma URL (optional)</label>
+        <input id="figmaUrl" type="text" placeholder="https://www.figma.com/file/..." />
+      </div>
+      <div>
+        <label>Personas (choose up to 5)</label>
+        <select id="personas" multiple size="5">
+          <option>Senior Designer</option>
+          <option>Accessibility Specialist</option>
+          <option>Devil’s Advocate PM</option>
+          <option>SME</option>
+          <option>UX Researcher</option>
+        </select>
+        <small>Hold Cmd/Ctrl to select multiple</small>
+      </div>
+    </div>
+
+    <label>Context for the panel</label>
+    <textarea id="context" rows="6" placeholder="Describe goals, audience, constraints, design system, links, known issues..."></textarea>
+
+    <label>Sources (optional, one per line)</label>
+    <textarea id="sources" rows="4" placeholder="e.g., Design System link, WCAG AA, PRD link"></textarea>
+
+    <div class="row">
+      <div>
+        <label>Harshness (1–5)</label>
+        <input id="harshness" type="range" min="1" max="5" value="3" />
+      </div>
+      <div>
+        <label>Innovation bias</label>
+        <select id="innovation">
+          <option value="consistency">Consistency</option>
+          <option value="neutral" selected>Neutral</option>
+          <option value="novelty">Novelty</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Time horizon</label>
+        <select id="horizon">
+          <option>MVP</option>
+          <option>V1</option>
+          <option>V2+</option>
+        </select>
+      </div>
+      <div style="display:flex; align-items:end; justify-content:flex-end;">
+        <button id="run" class="btn">Run Panel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="out"></div>
+
+  <script>
+    const el = (sel) => document.querySelector(sel);
+    const out = el('#out');
+    const runBtn = el('#run');
+
+    runBtn.addEventListener('click', async () => {
+      out.innerHTML = '<div class="card"><em>Running panel… this usually takes ~10–30s.</em></div>';
+      const personas = Array.from(el('#personas').selectedOptions).map(o => o.value);
+      const payload = {
+        figmaUrl: el('#figmaUrl').value.trim(),
+        context: el('#context').value.trim(),
+        sources: el('#sources').value.trim().split('\n').filter(Boolean),
+        personas,
+        sliders: {
+          harshness: Number(el('#harshness').value),
+          innovation_bias: el('#innovation').value,
+          horizon: el('#horizon').value,
+        }
+      };
+      try {
+        const res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderResult(data);
+      } catch (e) {
+        out.innerHTML = '<div class="card" style="color:#b91c1c">Error: ' + e.message + '</div>';
+      }
+    });
+
+    function renderResult(data) {
+      const dl = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
+      out.innerHTML = `
+        <div class="card">
+          <h2>Summary</h2>
+          <p>${escapeHtml(data.summary || '')}</p>
+          <div style="margin:12px 0;">
+            <a class="pill" href="${dl}" download="virtual-org-critique.json">⬇️ Download JSON</a>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Top Findings</h2>
+          ${renderFindings(data.top_findings || [])}
+        </div>
+        <div class="card">
+          <h2>Open Questions</h2>
+          <ul>${(data.open_questions || []).map(q => `<li>${escapeHtml(q)}</li>`).join('')}</ul>
+        </div>
+        <div class="card">
+          <h2>Actions</h2>
+          <ul>${(data.actions || []).map(a => `<li><strong>${escapeHtml(a.owner || '?')}</strong>: ${escapeHtml(a.title || '')}</li>`).join('')}</ul>
+        </div>
+        <div class="card">
+          <h2>Transcript (compact)</h2>
+          <pre>${escapeHtml(JSON.stringify(data.transcript || [], null, 2))}</pre>
+        </div>
+      `;
+    }
+
+    function renderFindings(list) {
+      if (!list.length) return '<p>No findings returned.</p>';
+      return `<ul>${list.map(f => `
+        <li style="margin-bottom:8px;">
+          <div><span class="pill">${escapeHtml(f.area || 'Other')}</span>
+               <span class="pill">Severity: ${escapeHtml(f.severity || 'Unknown')}</span>
+               <span class="pill">${escapeHtml(f.id || '')}</span></div>
+          <div><strong>${escapeHtml(f.finding || '')}</strong></div>
+          <div><em>Recommendation:</em> ${escapeHtml(f.recommendation || '')}</div>
+          <div><small>Evidence: ${(f.evidence || []).map(e => escapeHtml(e)).join(', ')}</small></div>
+        </li>`).join('')}
+      </ul>`;
+    }
+
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+  </script>
+</body>
+</html>
